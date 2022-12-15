@@ -35,6 +35,8 @@ BuildRequires:  libtasn1
 BuildRequires:  gcc
 BuildRequires:  libseccomp-devel
 BuildRequires:  python3-devel
+# XCP-ng: add epel-rpm-macros for %%ldconfig_post and %%ldconfig_postun
+BuildRequires:  epel-rpm-macros
 %{?_cov_buildrequires}
 
 Requires:       %{name}-libs = %{version}-%{release}
