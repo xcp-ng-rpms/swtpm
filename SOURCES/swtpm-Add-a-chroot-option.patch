@@ -1,0 +1,516 @@
+From 68e5428492365c50ec6e2dfcada6621b61c91666 Mon Sep 17 00:00:00 2001
+From: Jennifer Herbert <jennifer.herbert@citrix.com>
+Date: Tue, 23 Aug 2022 17:08:10 +0100
+Subject: [PATCH] swtpm: Add a chroot option
+
+Add an option to enter a chroot after starting swtpm. This is useful for
+sandboxing purposes. When this option is used, it is expected that swtpm
+is started as root and the --runas option is used to subsequently drop
+privileges (otherwise the chroot could be escaped).
+
+Signed-off-by: Jennifer Herbert <jennifer.herbert@citrix.com>
+Signed-off-by: Ross Lagerwall <ross.lagerwall@citrix.com>
+diff --git a/man/man8/swtpm.pod b/man/man8/swtpm.pod
+index 7879d7c..46cbc8a 100644
+--- a/man/man8/swtpm.pod
++++ b/man/man8/swtpm.pod
+@@ -267,6 +267,11 @@ has been opened for writing.
+ 
+ Switch to the given user. This option can only be used when swtpm is started as root.
+ 
++=item B<-R|--chroot E<lt>path<gt>>
++
++Chroot to the given directory at startup. This option can only be used when swtpm is
++started as root.
++
+ =item B<--seccomp action=none|log|kill> (since v0.2)
+ 
+ This option allows a user to select the action to take by the seccomp profile when
+diff --git a/src/swtpm/cuse_tpm.c b/src/swtpm/cuse_tpm.c
+index d577d88..765a22c 100644
+--- a/src/swtpm/cuse_tpm.c
++++ b/src/swtpm/cuse_tpm.c
+@@ -130,6 +130,7 @@ static GMutex *file_ops_lock;
+ 
+ struct cuse_param {
+     char *runas;
++    char *chroot;
+     char *logging;
+     char *keydata;
+     char *migkeydata;
+@@ -231,6 +232,7 @@ static const char *usage =
+ "                       startup-...: send Startup command with this type;\n"
+ "-r|--runas <user>   :  after creating the CUSE device, change to the given\n"
+ "                       user\n"
++"-R|--chroot <path>  :  chroot to the given directory at startup\n"
+ "--tpm2              :  choose TPM2 functionality\n"
+ #ifdef WITH_SECCOMP
+ # ifndef SCMP_ACT_LOG
+@@ -1440,6 +1442,7 @@ int swtpm_cuse_main(int argc, char **argv, const char *prgname, const char *ifac
+         {"min"           , required_argument, 0, 'm'},
+         {"name"          , required_argument, 0, 'n'},
+         {"runas"         , required_argument, 0, 'r'},
++        {"chroot"        , required_argument, 0, 'R'},
+         {"log"           , required_argument, 0, 'l'},
+         {"locality"      , required_argument, 0, 'L'},
+         {"key"           , required_argument, 0, 'k'},
+@@ -1483,7 +1486,7 @@ int swtpm_cuse_main(int argc, char **argv, const char *prgname, const char *ifac
+     tpmversion = TPMLIB_TPM_VERSION_1_2;
+ 
+     while (true) {
+-        opt = getopt_long(argc, argv, "M:m:n:r:hv", longopts, &longindex);
++        opt = getopt_long(argc, argv, "M:m:n:r:R:hv", longopts, &longindex);
+ 
+         if (opt == -1)
+             break;
+@@ -1537,6 +1540,9 @@ int swtpm_cuse_main(int argc, char **argv, const char *prgname, const char *ifac
+         case 'r': /* runas */
+             param.runas = optarg;
+             break;
++        case 'R':
++            param.chroot = optarg;
++            break;
+         case 'l': /* log */
+             param.logging = optarg;
+             break;
+@@ -1597,6 +1603,13 @@ int swtpm_cuse_main(int argc, char **argv, const char *prgname, const char *ifac
+         goto exit;
+     }
+ 
++    if (param.chroot) {
++        if (do_chroot(param.chroot) < 0) {
++            ret = EXIT_FAILURE;
++            goto exit;
++        }
++    }
++
+     if (param.runas) {
+         if (!(passwd = getpwnam(param.runas))) {
+             logprintf(STDERR_FILENO, "User '%s' does not exist\n",
+diff --git a/src/swtpm/swtpm.c b/src/swtpm/swtpm.c
+index d4ad682..b48175c 100644
+--- a/src/swtpm/swtpm.c
++++ b/src/swtpm/swtpm.c
+@@ -173,6 +173,8 @@ static void usage(FILE *file, const char *prgname, const char *iface)
+     "                   send an INIT via control channel;\n"
+     "                   startup-...: send Startup command with this type;\n"
+     "-r|--runas <user>: change to the given user\n"
++    "-R|--chroot <path>\n"
++    "                 : chroot to the given directory at startup\n"
+     "--tpm2           : choose TPM2 functionality\n"
+ #ifdef WITH_SECCOMP
+ # ifndef SCMP_ACT_LOG
+@@ -231,6 +233,7 @@ int swtpm_main(int argc, char **argv, const char *prgname, const char *iface)
+     char *flagsdata = NULL;
+     char *seccompdata = NULL;
+     char *runas = NULL;
++    char *chroot = NULL;
+     bool need_init_cmd = true;
+ #ifdef DEBUG
+     time_t              start_time;
+@@ -245,6 +248,7 @@ int swtpm_main(int argc, char **argv, const char *prgname, const char *iface)
+         {"fd"        , required_argument, 0, 'f'},
+         {"server"    , required_argument, 0, 'c'},
+         {"runas"     , required_argument, 0, 'r'},
++        {"chroot"    , required_argument, 0, 'R'},
+         {"terminate" ,       no_argument, 0, 't'},
+         {"locality"  , required_argument, 0, 'L'},
+         {"log"       , required_argument, 0, 'l'},
+@@ -267,7 +271,7 @@ int swtpm_main(int argc, char **argv, const char *prgname, const char *iface)
+     log_set_prefix("swtpm: ");
+ 
+     while (TRUE) {
+-        opt = getopt_long(argc, argv, "dhp:f:tr:", longopts, &longindex);
++        opt = getopt_long(argc, argv, "dhp:f:tr:R:", longopts, &longindex);
+ 
+         if (opt == -1)
+             break;
+@@ -395,6 +399,10 @@ int swtpm_main(int argc, char **argv, const char *prgname, const char *iface)
+             runas = optarg;
+             break;
+ 
++        case 'R':
++            chroot = optarg;
++            break;
++
+         case 'S':
+             seccompdata = optarg;
+             break;
+@@ -411,6 +419,11 @@ int swtpm_main(int argc, char **argv, const char *prgname, const char *iface)
+         exit(EXIT_FAILURE);
+     }
+ 
++    if (chroot) {
++        if (do_chroot(chroot) < 0)
++            exit(EXIT_FAILURE);
++    }
++
+     /* change process ownership before accessing files */
+     if (runas) {
+         if (change_process_owner(runas) < 0)
+diff --git a/src/swtpm/swtpm_chardev.c b/src/swtpm/swtpm_chardev.c
+index 165d568..0f5e0e1 100644
+--- a/src/swtpm/swtpm_chardev.c
++++ b/src/swtpm/swtpm_chardev.c
+@@ -182,6 +182,8 @@ static void usage(FILE *file, const char *prgname, const char *iface)
+     "                   mode allows a user to set the file mode bits of the state files;\n"
+     "                   the default mode is 0640;\n"
+     "-r|--runas <user>: change to the given user\n"
++    "-R|--chroot <path>\n"
++    "                 : chroot to the given directory at startup\n"
+ #ifdef WITH_VTPM_PROXY
+     "--vtpm-proxy     : spawn a Linux vTPM proxy driver device and read TPM\n"
+ #endif
+@@ -287,6 +289,7 @@ int swtpm_chardev_main(int argc, char **argv, const char *prgname, const char *i
+     char *flagsdata = NULL;
+     char *seccompdata = NULL;
+     char *runas = NULL;
++    char *chroot = NULL;
+ #ifdef WITH_VTPM_PROXY
+     bool use_vtpm_proxy = false;
+ #endif
+@@ -303,6 +306,7 @@ int swtpm_chardev_main(int argc, char **argv, const char *prgname, const char *i
+         {"chardev"   , required_argument, 0, 'c'},
+         {"fd"        , required_argument, 0, 'f'},
+         {"runas"     , required_argument, 0, 'r'},
++        {"chroot"    , required_argument, 0, 'R'},
+         {"locality"  , required_argument, 0, 'L'},
+         {"log"       , required_argument, 0, 'l'},
+         {"key"       , required_argument, 0, 'k'},
+@@ -327,7 +331,7 @@ int swtpm_chardev_main(int argc, char **argv, const char *prgname, const char *i
+     log_set_prefix("swtpm: ");
+ 
+     while (TRUE) {
+-        opt = getopt_long(argc, argv, "dhc:f:r:", longopts, &longindex);
++        opt = getopt_long(argc, argv, "dhc:f:r:R:", longopts, &longindex);
+ 
+         if (opt == -1)
+             break;
+@@ -440,6 +444,10 @@ int swtpm_chardev_main(int argc, char **argv, const char *prgname, const char *i
+             runas = optarg;
+             break;
+ 
++        case 'R':
++            chroot = optarg;
++            break;
++
+ #ifdef WITH_VTPM_PROXY
+         case 'v':
+             use_vtpm_proxy = true;
+@@ -462,6 +470,11 @@ int swtpm_chardev_main(int argc, char **argv, const char *prgname, const char *i
+         exit(EXIT_FAILURE);
+     }
+ 
++    if (chroot) {
++        if (do_chroot(chroot) < 0)
++            exit(EXIT_FAILURE);
++    }
++
+     /* change process ownership before accessing files */
+     if (runas) {
+         if (change_process_owner(runas) < 0)
+diff --git a/src/swtpm/utils.c b/src/swtpm/utils.c
+index 8beb32d..14cc976 100644
+--- a/src/swtpm/utils.c
++++ b/src/swtpm/utils.c
+@@ -146,6 +146,23 @@ change_process_owner(const char *user)
+     return 0;
+ }
+ 
++int
++do_chroot(const char *path)
++{
++    if (chroot(path) < 0) {
++        logprintf(STDERR_FILENO, "chroot failed: %s\n",
++                  strerror(errno));
++        return -1;
++    }
++
++    if (chdir("/") < 0) {
++        logprintf(STDERR_FILENO, "chdir failed: %s\n",
++                  strerror(errno));
++        return -1;
++    }
++    return 0;
++}
++
+ void tpmlib_debug_libtpms_parameters(TPMLIB_TPMVersion tpmversion)
+ {
+     switch (tpmversion) {
+diff --git a/src/swtpm/utils.h b/src/swtpm/utils.h
+index 7502442..d3e6b30 100644
+--- a/src/swtpm/utils.h
++++ b/src/swtpm/utils.h
+@@ -61,6 +61,7 @@ typedef void (*sighandler_t)(int);
+ int install_sighandlers(int pipefd[2], sighandler_t handler);
+ void uninstall_sighandlers(void);
+ int change_process_owner(const char *owner);
++int do_chroot(const char *path);
+ 
+ void tpmlib_debug_libtpms_parameters(TPMLIB_TPMVersion);
+ 
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index f076699..65258fe 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -46,6 +46,9 @@ TESTS += \
+ 	test_swtpm_setup_misc
+ 
+ TESTS += \
++	test_tpm2_chroot_socket \
++	test_tpm2_chroot_chardev \
++	test_tpm2_chroot_cuse \
+ 	test_tpm2_ctrlchannel2 \
+ 	test_tpm2_derived_keys \
+ 	test_tpm2_encrypted_state \
+diff --git a/tests/test_tpm2_chroot_chardev b/tests/test_tpm2_chroot_chardev
+new file mode 100755
+index 0000000..faab321
+--- /dev/null
++++ b/tests/test_tpm2_chroot_chardev
+@@ -0,0 +1,74 @@
++#!/usr/bin/env bash
++
++# For the license, see the LICENSE file in the root directory.
++
++if [ "$(id -u)" -ne 0 ]; then
++        echo "Need to be root to run this test."
++        exit 77
++fi
++
++if [ "$(uname -s)" != "Linux" ]; then
++	# Due to using /proc/<pid>/root
++	echo "This test only runs only Linux."
++	exit 77
++fi
++
++ROOT=${abs_top_builddir:-$(dirname "$0")/..}
++TESTDIR=${abs_top_testdir:-$(dirname "$0")}
++
++SWTPM=swtpm
++SWTPM_EXE=${SWTPM_EXE:-$ROOT/src/swtpm/$SWTPM}
++PID_FILE=/${SWTPM}.pid
++
++source ${TESTDIR}/common
++source ${TESTDIR}/test_common
++skip_test_no_chardev "${SWTPM_EXE}"
++skip_test_no_tpm20 "${SWTPM_EXE}"
++
++trap "cleanup" SIGTERM EXIT
++
++function cleanup()
++{
++	rm -rf $TPMDIR
++	if [ -n "$PID" ]; then
++		kill_quiet -SIGTERM $PID 2>/dev/null
++	fi
++}
++
++for OPTION in --chroot -R; do
++	TPMDIR="$(mktemp -d)" || exit 1
++	mkdir $TPMDIR/dev
++	mknod -m 0666 $TPMDIR/dev/urandom c 1 9
++
++	# use a pseudo terminal
++	exec 100<>/dev/ptmx
++	$SWTPM_EXE chardev \
++		--fd 100 \
++		"$OPTION" $TPMDIR \
++		--tpmstate dir=/ \
++		--pid file=$PID_FILE \
++		--tpm2 \
++		--flags not-need-init \
++		${SWTPM_TEST_SECCOMP_OPT} &
++	PID=$!
++
++	if wait_for_file $TPMDIR/$PID_FILE 3; then
++		echo "Error: Chardev TPM did not write pidfile."
++		exit 1
++	fi
++
++	validate_pidfile $PID $TPMDIR/$PID_FILE
++
++	if [ "$(readlink /proc/$PID/root)" != $TPMDIR ]; then
++		echo "Test 1 failed: Unexpected chroot dir"
++		exit 1
++	fi
++
++	if [ ! -f ${TPMDIR}/tpm2-00.permall ]; then
++		echo "Missing state file"
++		exit 1
++	fi
++
++	echo "Test $OPTION passed"
++	cleanup
++done
+diff --git a/tests/test_tpm2_chroot_cuse b/tests/test_tpm2_chroot_cuse
+new file mode 100755
+index 0000000..33e9887
+--- /dev/null
++++ b/tests/test_tpm2_chroot_cuse
+@@ -0,0 +1,81 @@
++#!/usr/bin/env bash
++
++# For the license, see the LICENSE file in the root directory.
++
++if [ "$(id -u)" -ne 0 ]; then
++        echo "Need to be root to run this test."
++        exit 77
++fi
++
++if [ "$(uname -s)" != "Linux" ]; then
++	# Due to using /proc/<pid>/root
++	echo "This test only runs only Linux."
++	exit 77
++fi
++
++ROOT=${abs_top_builddir:-$(dirname "$0")/..}
++TESTDIR=${abs_top_testdir:-$(dirname "$0")}
++
++SWTPM=swtpm
++SWTPM_EXE=${SWTPM_EXE:-$ROOT/src/swtpm/$SWTPM}
++PID_FILE=/${SWTPM}.pid
++VTPM_NAME="vtpm-test-chroot"
++SWTPM_DEV_NAME="/dev/${VTPM_NAME}"
++
++source ${TESTDIR}/common
++source ${TESTDIR}/test_common
++source ${TESTDIR}/test_cuse
++
++skip_test_no_tpm20 "${SWTPM_EXE}"
++
++trap "cleanup" SIGTERM EXIT
++
++function cleanup()
++{
++	rm -rf $TPMDIR
++	if [ -n "$PID" ]; then
++		kill_quiet -SIGTERM $PID 2>/dev/null
++	fi
++}
++
++for OPTION in --chroot -R; do
++	TPMDIR="$(mktemp -d)" || exit 1
++	mkdir $TPMDIR/dev
++	mknod -m 0666 $TPMDIR/dev/urandom c 1 9
++	mknod -m 0666 $TPMDIR/dev/cuse c 10 203
++
++	$SWTPM_EXE cuse \
++		-n "$SWTPM_DEV_NAME" \
++		"$OPTION" $TPMDIR \
++		--tpmstate dir=/ \
++		--pid file=$PID_FILE \
++		--tpm2 \
++		--flags not-need-init \
++		${SWTPM_TEST_SECCOMP_OPT} &>/dev/null &
++
++	if wait_for_file $TPMDIR/$PID_FILE 3; then
++		echo "Error: CUSE TPM did not write pidfile."
++		exit 1
++	fi
++
++	PID=$(ps aux |
++		grep "cuse" |
++		grep " ${SWTPM_DEV_NAME}" |
++		grep -v grep |
++		gawk '{print $2}')
++
++	validate_pidfile $PID $TPMDIR/$PID_FILE
++
++	if [ "$(readlink /proc/$PID/root)" != $TPMDIR ]; then
++		echo "Test 1 failed: Unexpected chroot dir"
++		exit 1
++	fi
++
++	if [ ! -f ${TPMDIR}/tpm2-00.permall ]; then
++		echo "Missing state file"
++		exit 1
++	fi
++
++	echo "Test $OPTION passed"
++	cleanup
++done
+diff --git a/tests/test_tpm2_chroot_socket b/tests/test_tpm2_chroot_socket
+new file mode 100755
+index 0000000..3109b08
+--- /dev/null
++++ b/tests/test_tpm2_chroot_socket
+@@ -0,0 +1,78 @@
++#!/usr/bin/env bash
++
++# For the license, see the LICENSE file in the root directory.
++
++if [ "$(id -u)" -ne 0 ]; then
++        echo "Need to be root to run this test."
++        exit 77
++fi
++
++if [ "$(uname -s)" != "Linux" ]; then
++	# Due to using /proc/<pid>/root
++	echo "This test only runs only Linux."
++	exit 77
++fi
++
++ROOT=${abs_top_builddir:-$(dirname "$0")/..}
++TESTDIR=${abs_top_testdir:=$(dirname "$0")}
++
++SWTPM=swtpm
++SWTPM_EXE=${SWTPM_EXE:-$ROOT/src/swtpm/$SWTPM}
++PID_FILE=/${SWTPM}.pid
++
++source ${TESTDIR}/common
++source ${TESTDIR}/test_common
++skip_test_no_chardev "${SWTPM_EXE}"
++skip_test_no_tpm20 "${SWTPM_EXE}"
++
++trap "cleanup" SIGTERM EXIT
++
++function cleanup()
++{
++	rm -rf $TPMDIR
++	if [ -n "$PID" ]; then
++		kill_quiet -SIGTERM $PID 2>/dev/null
++	fi
++}
++
++PORT=65468
++
++export TCSD_TCP_DEVICE_HOSTNAME=localhost
++export TCSD_TCP_DEVICE_PORT=$PORT
++export TCSD_USE_TCP_DEVICE=1
++
++for OPTION in --chroot -R; do
++	TPMDIR="$(mktemp -d)" || exit 1
++	mkdir $TPMDIR/dev
++	mknod -m 0666 $TPMDIR/dev/urandom c 1 9
++
++	$SWTPM_EXE socket \
++		-p $PORT \
++		"$OPTION" $TPMDIR \
++		--tpmstate dir=/ \
++		--pid file=$PID_FILE \
++		--tpm2 \
++		--flags not-need-init \
++		${SWTPM_TEST_SECCOMP_OPT} &>/dev/null &
++	PID=$!
++
++	if wait_for_file $TPMDIR/$PID_FILE 3; then
++		echo "Error: socket TPM did not write pidfile."
++		exit 1
++	fi
++
++	validate_pidfile $PID $TPMDIR/$PID_FILE
++
++	if [ "$(readlink /proc/$PID/root)" != $TPMDIR ]; then
++		echo "Test 1 failed: Unexpected chroot dir"
++		exit 1
++	fi
++
++	if [ ! -f ${TPMDIR}/tpm2-00.permall ]; then
++		echo "Missing state file"
++		exit 1
++	fi
++
++	echo "Test $OPTION passed"
++	cleanup
++done

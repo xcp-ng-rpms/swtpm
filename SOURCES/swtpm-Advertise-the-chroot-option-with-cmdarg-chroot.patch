@@ -1,0 +1,79 @@
+From cdc39fd97750466a9bfa367bb544af7571447898 Mon Sep 17 00:00:00 2001
+From: Stefan Berger <stefanb@linux.ibm.com>
+Date: Thu, 25 Aug 2022 12:06:04 -0400
+Subject: [PATCH] swtpm: Advertise the --chroot option with cmdarg-chroot
+
+Advertise the availability of the chroot option with the cmdarg-chroot
+verb. Document it in the man page.
+
+Signed-off-by: Stefan Berger <stefanb@linux.ibm.com>
+diff --git a/man/man8/swtpm.pod b/man/man8/swtpm.pod
+index 46cbc8a..2fa3df7 100644
+--- a/man/man8/swtpm.pod
++++ b/man/man8/swtpm.pod
+@@ -310,6 +310,7 @@ may contain the following:
+         "cmdarg-key-fd",
+         "cmdarg-pwd-fd",
+         "cmdarg-print-states",
++        "cmdarg-chroot",
+         "nvram-backend-dir",
+         "nvram-backend-file",
+         "tpm-send-command-header",
+@@ -353,6 +354,10 @@ The I<--key> option supports the I<pwdfd=> parameter.
+ 
+ The I<--print-states> option is supported.
+ 
++=item B<cmdarg-chroot> (since v0.8)
++
++The I<--chroot> option is supported.
++
+ =item B<nvram-backend-dir> (since v0.7)
+ 
+ The I<--tpmstate> option supports the I<backend-uri=dir://...>
+diff --git a/src/swtpm/capabilities.c b/src/swtpm/capabilities.c
+index c528a8c..bbff7a6 100644
+--- a/src/swtpm/capabilities.c
++++ b/src/swtpm/capabilities.c
+@@ -143,7 +143,7 @@ int capabilities_print_json(bool cusetpm)
+          "{ "
+          "\"type\": \"swtpm\", "
+          "\"features\": [ "
+-             "%s%s%s%s%s%s%s%s%s%s%s"
++             "%s%s%s%s%s%s%s%s%s%s%s%s"
+           " ], "
+          "\"version\": \"" VERSION "\" "
+          "}",
+@@ -155,6 +155,7 @@ int capabilities_print_json(bool cusetpm)
+          true         ? "\"cmdarg-key-fd\", "          : "",
+          true         ? "\"cmdarg-pwd-fd\", "          : "",
+          true         ? "\"cmdarg-print-states\", "    : "",
++         true         ? "\"cmdarg-chroot\", "          : "",
+          nvram_backend_dir,
+          nvram_backend_file,
+          keysizecaps  ? keysizecaps                    : ""
+diff --git a/tests/_test_print_capabilities b/tests/_test_print_capabilities
+index 794b5ed..99962ab 100755
+--- a/tests/_test_print_capabilities
++++ b/tests/_test_print_capabilities
+@@ -25,7 +25,7 @@ if [ "${SWTPM_IFACE}" != "cuse" ]; then
+ 	noncuse='"tpm-send-command-header", "flags-opt-startup", '
+ fi
+ 
+-exp='\{ "type": "swtpm", "features": \[ "tpm-1.2",( "tpm-2.0",)? '${noncuse}${seccomp}'"cmdarg-key-fd", "cmdarg-pwd-fd", "cmdarg-print-states", "nvram-backend-dir", "nvram-backend-file" \], "version": "[^"]*" \}'
++exp='\{ "type": "swtpm", "features": \[ "tpm-1.2",( "tpm-2.0",)? '${noncuse}${seccomp}'"cmdarg-key-fd", "cmdarg-pwd-fd", "cmdarg-print-states", "cmdarg-chroot", "nvram-backend-dir", "nvram-backend-file" \], "version": "[^"]*" \}'
+ if ! [[ ${msg} =~ ${exp} ]]; then
+ 	echo "Unexpected response from ${SWTPM_IFACE} TPM to --print-capabilities:"
+ 	echo "Actual   : ${msg}"
+diff --git a/tests/_test_tpm2_print_capabilities b/tests/_test_tpm2_print_capabilities
+index 02986f3..acbcef7 100755
+--- a/tests/_test_tpm2_print_capabilities
++++ b/tests/_test_tpm2_print_capabilities
+@@ -26,7 +26,7 @@ if [ "${SWTPM_IFACE}" != "cuse" ]; then
+ fi
+ 
+ # The rsa key size reporting is variable, so use a regex
+-exp='\{ "type": "swtpm", "features": \[( "tpm-1.2",)? "tpm-2.0", '${noncuse}${seccomp}'"cmdarg-key-fd", "cmdarg-pwd-fd", "cmdarg-print-states", "nvram-backend-dir", "nvram-backend-file"(, "rsa-keysize-1024")?(, "rsa-keysize-2048")?(, "rsa-keysize-3072")? \], "version": "[^"]*" \}'
++exp='\{ "type": "swtpm", "features": \[( "tpm-1.2",)? "tpm-2.0", '${noncuse}${seccomp}'"cmdarg-key-fd", "cmdarg-pwd-fd", "cmdarg-print-states", "cmdarg-chroot", "nvram-backend-dir", "nvram-backend-file"(, "rsa-keysize-1024")?(, "rsa-keysize-2048")?(, "rsa-keysize-3072")? \], "version": "[^"]*" \}'
+ if ! [[ ${msg} =~ ${exp} ]]; then
+ 	echo "Unexpected response from ${SWTPM_IFACE} TPM to --print-capabilities:"
+ 	echo "Actual   : ${msg}"

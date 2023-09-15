@@ -1,0 +1,56 @@
+From a44b642d70fd30cb464954f28ea188538fb4e628 Mon Sep 17 00:00:00 2001
+From: Stefan Berger <stefanb@linux.ibm.com>
+Date: Thu, 25 Aug 2022 11:58:06 -0400
+Subject: [PATCH] tests: If filesystem is mounted with nodev opt skip CUSE
+ chroot test
+
+The CUSE TPM test will not work if the filesystem the test case runs
+on is mounted with the 'nodev' option since the CUSE TPM can then
+not use /tmp/.../dev/cuse.
+
+Signed-off-by: Stefan Berger <stefanb@linux.ibm.com>
+---
+ tests/test_tpm2_chroot_cuse | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/tests/test_tpm2_chroot_cuse b/tests/test_tpm2_chroot_cuse
+index 33e9887..1d057dd 100755
+--- a/tests/test_tpm2_chroot_cuse
++++ b/tests/test_tpm2_chroot_cuse
+@@ -13,6 +13,11 @@ if [ "$(uname -s)" != "Linux" ]; then
+ 	exit 77
+ fi
+ 
++if [ -z "$(type -P df)" ]; then
++	echo "This test requires the 'df' tool."
++	exit 77
++fi
++
+ ROOT=${abs_top_builddir:-$(dirname "$0")/..}
+ TESTDIR=${abs_top_testdir:-$(dirname "$0")}
+ 
+@@ -40,6 +45,21 @@ function cleanup()
+ 
+ for OPTION in --chroot -R; do
+ 	TPMDIR="$(mktemp -d)" || exit 1
++
++	# CUSE TPM will only work if the filesystem does not have 'nodev' option
++	mnt=$(df $TPMDIR | tail -n 1 | gawk '{print $1" "$6}')
++	if [ -z "${mnt}" ]; then
++		echo " Error: Could not determine filesystem and mount point of $TPMDIR"
++		exit 1
++	fi
++	nodev="$(grep -E "^${mnt} " /proc/mounts |
++		 gawk '{print ","$4","}' |
++		 grep ",nodev,")"
++	if [ -n "${nodev}" ]; then
++		echo " Error: '${mnt}' is mounted with nodev option. Skipping test."
++		exit 77
++	fi
++
+ 	mkdir $TPMDIR/dev
+ 	mknod -m 0666 $TPMDIR/dev/urandom c 1 9
+ 	mknod -m 0666 $TPMDIR/dev/cuse c 10 203
+-- 
+2.31.1
+

@@ -1,6 +1,6 @@
-%global package_speccommit d5884125494924fcadf7ab03add5825b6e6612c0
+%global package_speccommit 5cd8e9d62fb54e737545a64a250ca753c45b95d9
 %global usver 0.7.3
-%global xsver 2
+%global xsver 5
 %global xsrel %{xsver}%{?xscount}%{?xshash}
 %global package_srccommit v0.7.3
 
@@ -10,9 +10,14 @@ Version:        0.7.3
 Release: %{?xsrel}%{?dist}
 License:        BSD
 Source0: swtpm-0.7.3.tar.gz
-Patch0: gnutls-compat.patch
-Patch1: chroot.patch
-Patch2: set-localca-options.patch
+Patch0: swtpm_setup-Configure-swtpm-to-log-to-stdout-err-if-.patch
+Patch1: swtpm-Add-a-chroot-option.patch
+Patch2: tests-If-filesystem-is-mounted-with-nodev-opt-skip-C.patch
+Patch3: swtpm-Advertise-the-chroot-option-with-cmdarg-chroot.patch
+Patch4: 0001-Make-stdout-unbuffered-in-swtpm_-setup-localca.patch
+Patch5: gnutls-compat.patch
+Patch6: set-localca-options.patch
+Patch7: add-http-backend.patch
 
 BuildRequires:  git-core
 BuildRequires:  automake
@@ -35,6 +40,7 @@ BuildRequires:  libtasn1
 BuildRequires:  gcc
 BuildRequires:  libseccomp-devel
 BuildRequires:  python3-devel
+BuildRequires:  libcurl-devel
 %{?_cov_buildrequires}
 
 Requires:       %{name}-libs = %{version}-%{release}
@@ -120,6 +126,12 @@ NOCONFIGURE=1 ./autogen.sh
 %{?_cov_wrap} %make_build
 
 %check
+# RPM uses patch which doesn't apply file permissions for these new files so
+# add the execute bit here.
+chmod 755 tests/test_tpm2_chroot_chardev
+chmod 755 tests/test_tpm2_chroot_cuse
+chmod 755 tests/test_tpm2_chroot_socket
+
 make %{?_smp_mflags} check VERBOSE=1
 
 %install
@@ -136,6 +148,19 @@ rm -f %{buildroot}%{_datadir}/%{name}/swtpm-create-tpmca
 %{?_cov_results_package}
 
 %changelog
+* Wed Aug 02 2023 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.3-5
+- CA-380178: Make stdout unbuffered in swtpm_{setup,localca}
+
+* Wed Jun 07 2023 Edwin Török <edvin.torok@citrix.com> - 0.7.3-4
+- Fix http method and parameter mismatch
+- fix missing \n in logprintf
+
+* Wed May 31 2023 Edwin Török <edwin.torok@cloud.com> - 0.7.3-3
+- CA-371900: Capture output from swtpm during setup
+- Replace patch with upstream backports
+- CP-43409: update TPM manufacturer
+- CP-42059: Use simpler HTTP based REST API
+
 * Tue Aug 23 2022 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.3-2
 - CP-39549: Configure defaults for swtpm_localca
 - CA-363859: Make compatible with GnuTLS 3.3
