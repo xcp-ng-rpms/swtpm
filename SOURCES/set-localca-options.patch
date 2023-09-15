@@ -6,6 +6,6 @@ index c688ea2..a585147 100644
 ---platform-manufacturer Fedora
 ---platform-version 2.1
 ---platform-model QEMU
-+--platform-manufacturer Citrix
++--platform-manufacturer XenServer
 +--platform-version 1.0
 +--platform-model Xen

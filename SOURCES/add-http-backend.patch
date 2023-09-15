@@ -1,0 +1,703 @@
+diff --git a/configure.ac b/configure.ac
+index 08acf92..d3462a9 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -232,6 +232,18 @@ if test $? -ne 0; then
+ fi
+ AC_SUBST([JSON_GLIB_LIBS])
+ 
++CURL_CFLAGS=$(pkg-config --cflags libcurl)
++if test $? -ne 0; then
++   AC_MSG_ERROR("Is libcurl-devel installed? -- could not get cflags")
++fi
++AC_SUBST([CURL_CFLAGS])
++
++CURL_LIBS=$(pkg-config --libs libcurl)
++if test $? -ne 0; then
++   AC_MSG_ERROR("Is libcurl-devel installed? -- could not get libs")
++fi
++AC_SUBST([CURL_LIBS])
++
+ GLIB_CFLAGS=$(pkg-config --cflags glib-2.0)
+ if test $? -ne 0; then
+    AC_MSG_ERROR("Is libglib-2.0-dev/glib2-devel installed? -- could not get cflags")
+@@ -615,6 +627,8 @@ echo "       MY_LDFLAGS = $MY_LDFLAGS"
+ echo "  LIBSECCOMP_LIBS = $LIBSECCOMP_LIBS"
+ echo " JSON_GLIB_CFLAGS = $JSON_GLIB_CFLAGS"
+ echo "   JSON_GLIB_LIBS = $JSON_GLIB_LIBS"
++echo "      CURL_CFLAGS = $CURL_CFLAGS"
++echo "        CURL_LIBS = $CURL_LIBS"
+ echo "      GLIB_CFLAGS = $GLIB_CFLAGS"
+ echo "        GLIB_LIBS = $GLIB_LIBS"
+ echo "     LOCALCA_LIBS = $LOCALCA_LIBS"
+diff --git a/src/swtpm/Makefile.am b/src/swtpm/Makefile.am
+index 5454a6f..3144f8b 100644
+--- a/src/swtpm/Makefile.am
++++ b/src/swtpm/Makefile.am
+@@ -52,6 +52,7 @@ libswtpm_libtpms_la_SOURCES = \
+ 	swtpm_io.c \
+ 	swtpm_nvstore.c \
+ 	swtpm_nvstore_dir.c \
++	swtpm_nvstore_http.c \
+ 	swtpm_nvstore_linear.c \
+ 	swtpm_nvstore_linear_file.c \
+ 	tlv.c \
+@@ -73,6 +74,7 @@ libswtpm_libtpms_la_CFLAGS = \
+ 	$(CFLAGS) \
+ 	$(HARDENING_CFLAGS) \
+ 	$(GLIB_CFLAGS) \
++	$(CURL_CFLAGS) \
+ 	$(LIBSECCOMP_CFLAGS)
+ 
+ libswtpm_libtpms_la_LDFLAGS = \
+@@ -82,6 +84,7 @@ libswtpm_libtpms_la_LDFLAGS = \
+ libswtpm_libtpms_la_LIBADD = \
+ 	$(LIBTPMS_LIBS) \
+ 	$(GLIB_LIBS) \
++	$(CURL_LIBS) \
+ 	$(LIBRT_LIBS) \
+ 	$(LIBSECCOMP_LIBS) \
+ 	$(LIBCRYPTO_LIBS)
+diff --git a/src/swtpm/swtpm.c b/src/swtpm/swtpm.c
+index b48175c..a7b9821 100644
+--- a/src/swtpm/swtpm.c
++++ b/src/swtpm/swtpm.c
+@@ -50,6 +50,7 @@
+ #include <sys/types.h>
+ #include <sys/socket.h>
+ 
++#include <curl/curl.h>
+ #include <libtpms/tpm_error.h>
+ #include <libtpms/tpm_library.h>
+ #include <libtpms/tpm_memory.h>
+diff --git a/src/swtpm/swtpm_nvstore.c b/src/swtpm/swtpm_nvstore.c
+index 144d897..4173d4c 100644
+--- a/src/swtpm/swtpm_nvstore.c
++++ b/src/swtpm/swtpm_nvstore.c
+@@ -187,6 +187,10 @@ TPM_RESULT SWTPM_NVRAM_Init(void)
+         g_nvram_backend_ops = &nvram_dir_ops;
+     } else if (strncmp(backend_uri, "file://", 7) == 0) {
+         g_nvram_backend_ops = &nvram_linear_ops;
++    } else if (strncmp(backend_uri, "http://", 7) == 0) {
++        g_nvram_backend_ops = &nvram_http_ops;
++    } else if (strncmp(backend_uri, "unix+http://", 12) == 0) {
++        g_nvram_backend_ops = &nvram_http_ops;
+     } else {
+         logprintf(STDERR_FILENO,
+                   "SWTPM_NVRAM_Init: Unsupported backend.\n");
+diff --git a/src/swtpm/swtpm_nvstore.h b/src/swtpm/swtpm_nvstore.h
+index 6e34891..f04abf6 100644
+--- a/src/swtpm/swtpm_nvstore.h
++++ b/src/swtpm/swtpm_nvstore.h
+@@ -129,6 +129,7 @@ struct nvram_backend_ops {
+ 
+ /* backend interfaces */
+ extern struct nvram_backend_ops nvram_dir_ops;
++extern struct nvram_backend_ops nvram_http_ops;
+ extern struct nvram_backend_ops nvram_linear_ops;
+ 
+ 
+diff --git a/src/swtpm/swtpm_nvstore_http.c b/src/swtpm/swtpm_nvstore_http.c
+new file mode 100644
+index 0000000..147fef9
+--- /dev/null
++++ b/src/swtpm/swtpm_nvstore_http.c
+@@ -0,0 +1,598 @@
++/* must be first to ensure we get asprintf */
++#define _GNU_SOURCE
++#include <stdio.h>
++#include <unistd.h>
++
++#include "config.h"
++
++#include <string.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++
++#include <curl/curl.h>
++#include <openssl/bio.h>
++#include <openssl/evp.h>
++#include <libtpms/tpm_error.h>
++
++#include "swtpm.h"
++#include "swtpm_debug.h"
++#include "swtpm_nvstore.h"
++#include "key.h"
++#include "logging.h"
++#include "tpmstate.h"
++#include "utils.h"
++
++#define TPM_DEBUGF(LEVEL, FMT, ARGS...) TPM_DEBUG(LEVEL"%s: "FMT"\n", __func__, ## ARGS)
++/* log levels 1 to 3 */
++#define TPM_DEBUG1(FMT, ARGS...) TPM_DEBUGF(" ", FMT, ## ARGS)
++#define TPM_DEBUG2(FMT, ARGS...) TPM_DEBUGF("  ", FMT, ## ARGS)
++#define TPM_DEBUG3(FMT, ARGS...) TPM_DEBUGF("   ", FMT, ## ARGS)
++
++/* curl_global_init is not thread safe prior to 7.84.0,
++ * and it must only be called when no other thread is running yet
++ * (not just no other curl-using thread).
++ * curl_easy_init would call curl_global_init automatically if needed, but that wouldn't necessarily be safe.
++ * constructor/destructor ensures it runs early/late enough
++ */
++
++__attribute__((constructor))
++static void
++SWTPM_NVRAM_Global_Init_Http() {
++    curl_global_init(CURL_GLOBAL_ALL);
++}
++
++__attribute__((destructor))
++static void
++SWTPM_NVRAM_Global_Cleanup_Http() {
++    curl_global_cleanup();
++}
++
++#define MAX_RECEIVE_SIZE (1024 * 1024)
++
++static CURL *curl;
++static char *socket_path;
++
++static TPM_RESULT
++SWTPM_NVRAM_Prepare_Http(const char *uri)
++{
++    TPM_DEBUG1("%s", uri);
++
++    /* can be called multiple times with same URI, initialize just once */
++    if (curl)
++        return 0;
++
++    curl = curl_easy_init();
++    if (!curl) {
++        logprintf(STDERR_FILENO, "curl_easy_init failed\n");
++        return TPM_FAIL;
++    }
++
++    if (strncmp(uri, "unix+http://", 12) == 0) {
++       const char *socket_path_encoded = uri + 12;
++       socket_path = curl_easy_unescape(curl, socket_path_encoded, 0, NULL);
++       size_t n;
++
++       if (!socket_path) {
++            logprintf(STDERR_FILENO, "Failed to unescape socket path: %s\n", socket_path_encoded);
++            curl_easy_cleanup(curl);
++            curl = NULL;
++            return TPM_FAIL;
++       }
++       n = strlen(socket_path);
++       if (n && socket_path[n - 1] == '/')
++            socket_path[n-1] = '\0';
++       TPM_DEBUG2("socket_path: %s", socket_path);
++    }
++
++    return 0;
++}
++
++static void
++SWTPM_NVRAM_Cleanup_Http(void)
++{
++    TPM_DEBUG1("");
++    curl_free(socket_path);
++    socket_path = NULL;
++    curl_easy_cleanup(curl);
++    /* handle cannot be used anymore */
++    curl = NULL;
++}
++
++/*
++ * Base64-encode a buffer. Returned via out as a NUL-terminated
++ * string. Returns true on success, false on failure.
++ */
++static bool
++base64_encode(const uint8_t *buf, size_t len, char **out)
++{
++    BIO *b64, *bio;
++    char *ptr;
++    int n;
++    long out_len;
++    size_t total = 0;
++
++    bio = BIO_new(BIO_s_mem());
++    if (!bio)
++        return false;
++    b64 = BIO_new(BIO_f_base64());
++    if (!b64) {
++        BIO_free_all(bio);
++        return false;
++    }
++    BIO_push(b64, bio);
++    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
++    BIO_set_close(bio, BIO_CLOSE);
++
++    while ((len - total) > 0) {
++        n = BIO_write(b64, buf + total, (int)(len - total));
++        if (n <= 0)
++            break;
++        total += n;
++    }
++
++    BIO_flush(b64);
++
++    if (total != len) {
++        BIO_free_all(b64);
++        return false;
++    }
++
++    out_len = BIO_get_mem_data(b64, &ptr);
++    *out = malloc(out_len + 1);
++    if (!*out) {
++        BIO_free_all(b64);
++        return false;
++    }
++    memcpy(*out, ptr, out_len);
++    (*out)[out_len] = '\0';
++
++    BIO_free_all(b64);
++
++    return true;
++}
++
++/*
++ * Base64-decode a NUL-terminated string. Returned via out and len_out as a
++ * buffer. Returns true on success, false on failure.
++ */
++static bool
++base64_decode(const char *encoded, unsigned char **out, uint32_t *len_out)
++{
++    BIO *b64, *bio;
++    size_t max_len;
++    int n;
++
++    max_len = strlen(encoded) * 3 / 4;
++    *out = malloc(max_len);
++    if (!*out)
++        return false;
++
++    bio = BIO_new_mem_buf(encoded, -1);
++    if (!bio) {
++        free(*out);
++        *out = NULL;
++        return false;
++    }
++    b64 = BIO_new(BIO_f_base64());
++    if (!b64) {
++        free(*out);
++        *out = NULL;
++        BIO_free_all(bio);
++        return false;
++    }
++    BIO_push(b64, bio);
++    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
++
++    *len_out = 0;
++    for (;;) {
++        n = BIO_read(b64, *out + *len_out, max_len - *len_out);
++        if (n <= 0)
++            break;
++        *len_out += n;
++    }
++    BIO_free_all(b64);
++
++    return true;
++}
++
++/*
++ * Constructs an http key that can be used to store or retrieve data.
++ * Returns a string of the form <path>/tpm2-<tpm_number>.<name>
++ * The caller must free it. Returns NULL of failure.
++ */
++static char *
++get_key(const char *uri, uint32_t tpm_number, const char *name)
++{
++    char *key = NULL;
++
++    if (asprintf(&key, "%s/tpm2-%02x.%s", uri, tpm_number, name) < 0) {
++        logprintf(STDERR_FILENO, "asprintf failed\n");
++        return NULL;
++    }
++
++    return key;
++}
++
++/*
++ * Struct and callback function used by SWTPM_NVRAM_do_request to store the received data
++ * in a string.
++ */
++struct OutputData {
++  char *data;
++  size_t size;
++};
++struct InputData {
++  const char *data;
++  size_t size;
++};
++
++static size_t
++write_cb(void *contents, size_t size, size_t nmemb, void *userp)
++{
++  struct OutputData *output = userp;
++  char *ptr;
++
++  size *= nmemb;
++
++  if (output->size + size > MAX_RECEIVE_SIZE)
++      return 0;
++
++  ptr = realloc(output->data, output->size + size + 1);
++  if (!ptr)
++    return 0;
++
++  output->data = ptr;
++  memcpy(output->data + output->size, contents, size);
++  output->size += size;
++  output->data[output->size] = 0;
++
++  return size;
++}
++
++static size_t
++read_cb(char *buffer, size_t size, size_t nitems, void *userdata)
++{
++    struct InputData *input = userdata;
++
++    /* doc says size is always 1, so this shouldn't overflow */
++    size_t n = size * nitems;
++    if (n > input->size)
++        n = input->size;
++
++    memcpy(buffer, input->data, n);
++    input->size -= n;
++    input->data += n;
++    return n;
++}
++
++static int
++SWTPM_NVRAM_curl_debug(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
++    char prefix = '\0';
++    /* we cannot query swtpm log level, so plumb through all curl verbose output through the tpm debug logging functions,
++     * which will turn output on/off as appropriate for the logging level */
++    switch (type) {
++      case CURLINFO_TEXT:
++        prefix = '*';
++        break;
++      case CURLINFO_HEADER_OUT:
++        prefix = '>';
++        break;
++      case CURLINFO_HEADER_IN:
++        prefix = '<';
++        break;
++      /* compiled with -Werror=switch-enum, so we cannot use 'default' */
++      case CURLINFO_DATA_IN:
++      case CURLINFO_DATA_OUT:
++      case CURLINFO_SSL_DATA_IN:
++      case CURLINFO_SSL_DATA_OUT:
++      case CURLINFO_END:
++        /* do not print body */
++        break;
++    }
++
++    if (prefix)
++        TPM_DEBUG3("%c%.*s\n", prefix, (int)size, data);
++
++    return 0;
++}
++
++enum method {
++    HEAD = 0,
++    GET,
++    PUT,
++    DELETE
++};
++
++/*
++ * Perform an HTTP request to the given URL.
++ *
++ * +--------+-------+------+
++ * | Method | data  |  out |
++ * +--------+-------+------+
++ * |  HEAD  | NULL  | NULL |
++ * |   GET  | NULL  |  ptr |
++ * |   PUT  | len>0 | NULL |
++ * | DELETE | NULL  | NULL |
++ * +--------+-------+------+
++ *
++ * If out is provided, return the response as a string.
++ *
++ */
++static TPM_RESULT
++SWTPM_NVRAM_do_request(enum method method, const char *url, const char *data, char **out)
++{
++    char errbuf[CURL_ERROR_SIZE];
++    struct curl_slist *list = NULL;
++    struct OutputData output;
++    struct InputData input;
++    CURLcode rc;
++    long response_code;
++
++    if (out)
++        *out = NULL;
++    output.data = NULL;
++    output.size = 0;
++    TPM_DEBUG2("uri: %s, body:%p, out:%p", url, data, out);
++
++    curl_easy_reset(curl);
++
++    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
++    curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, SWTPM_NVRAM_curl_debug);
++
++    if (strncmp(url, "unix+http://", 12) == 0) {
++       const char *actual_url = url + 5;
++        /* unix+http://, not unix:// or http+unix:// so we can easily transform this into http:// */
++       curl_easy_setopt(curl, CURLOPT_UNIX_SOCKET_PATH, socket_path);
++       /* for non-depriv sockets we need to replace the host, OR we could extract and url decode the host above */
++       curl_easy_setopt(curl, CURLOPT_URL, actual_url);
++       TPM_DEBUG2("socket path: %s, actual url: %s", socket_path, actual_url);
++    } else
++       curl_easy_setopt(curl, CURLOPT_URL, url);
++
++    if (data) {
++        input.data = data;
++        input.size = strlen(data);
++        switch (method) {
++          case PUT:
++            curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_cb);
++            curl_easy_setopt(curl, CURLOPT_READDATA, &input);
++            curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)input.size);
++            curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
++
++            list = curl_slist_append(list, "Content-Type: application/octet-stream");
++            if (!list) {
++                logprintf(STDERR_FILENO, "curl_slist_append failed\n");
++                return TPM_FAIL;
++            }
++
++            struct curl_slist *temp;
++            /* See https://everything.curl.dev/http/post/expect100
++             * also newer versions of curl disable this automatically for small requests
++             */
++            temp = curl_slist_append(list, "Expect:");
++            if (!temp) {
++                logprintf(STDERR_FILENO, "curl_slist_append failed\n");
++                curl_slist_free_all(list);
++                return TPM_FAIL;
++            }
++            list = temp;
++            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
++            break;
++
++          case HEAD:
++          case GET:
++          case DELETE:
++          default:
++            logprintf(STDERR_FILENO, "Method is expected to be PUT, is %d\n", method);
++            return TPM_FAIL;
++        }
++    } else {
++        if (!out) {
++            switch (method) {
++                case DELETE:
++                    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
++                    break;
++
++                case HEAD:
++                    curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
++                    break;
++
++                case PUT:
++                case GET:
++                default:
++                    logprintf(STDERR_FILENO, "Method is expected to be HEAD or DELETE, but is %d\n", method);
++                    return TPM_FAIL;
++            }
++        } else {
++            if (method != GET) {
++                logprintf(STDERR_FILENO, "Method is expected to be GET, but is %d\n", method);
++                return TPM_FAIL;
++            }
++        }
++    }
++
++    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
++    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &output);
++
++    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
++    errbuf[0] = 0;
++    rc = curl_easy_perform(curl);
++    curl_slist_free_all(list);
++    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, NULL);
++
++    if (rc != CURLE_OK) {
++        logprintf(STDERR_FILENO, "libcurl error on %s: (%d) %s\n",
++                  url, *errbuf ? errbuf : curl_easy_strerror(rc));
++        free(output.data);
++
++        return TPM_FAIL;
++    }
++
++    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
++    if (response_code != 200 && response_code != 204) {
++        logprintf(STDERR_FILENO, "HTTP code %d from %s\n", response_code, url);
++        TPM_DEBUG1("http error response: %s\n", output.data);
++        free(output.data);
++        return TPM_FAIL;
++    }
++
++    if (out)
++        *out = output.data;
++    else
++        free(output.data);
++
++    TPM_DEBUG3("curl OK");
++    return 0;
++}
++
++static TPM_RESULT
++SWTPM_NVRAM_LoadData_Http(unsigned char **data,
++                          uint32_t *length,
++                          uint32_t tpm_number,
++                          const char *name,
++                          const char *uri)
++{
++    TPM_RESULT rc = TPM_FAIL;
++    char *key, *resp = NULL;
++
++    TPM_DEBUG1("%s\n", name);
++
++    key = get_key(uri, tpm_number, name);
++    if (!key)
++        goto out;
++
++
++    if (SWTPM_NVRAM_do_request(GET, key, NULL, &resp))
++        goto out;
++
++    /*
++     * The retrieved data does not exist (i.e. first startup) so return
++     * TPM_RETRY as expected.
++     */
++    if (!resp || !*resp) {
++        TPM_DEBUG1("empty data");
++        rc = TPM_RETRY;
++        goto out;
++    }
++
++    if (!base64_decode(resp, data, length)) {
++        logprintf(STDERR_FILENO, "base64_decode failed on %d bytes\n", length);
++        goto out;
++    }
++
++    rc = 0;
++
++out:
++    free(key);
++    free(resp);
++
++    return rc;
++}
++
++static TPM_RESULT
++SWTPM_NVRAM_StoreData_Http(unsigned char *filedata,
++                           uint32_t filedata_length,
++                           uint32_t tpm_number,
++                           const char *name,
++                           const char *uri)
++{
++    TPM_RESULT rc = TPM_FAIL;
++    char *key, *val = NULL;
++
++    key = get_key(uri, tpm_number, name);
++    if (!key)
++        goto out;
++
++    if (!base64_encode(filedata, filedata_length, &val)) {
++        logprintf(STDERR_FILENO, "base64_encode failed on %d bytes\n", filedata_length);
++        goto out;
++    }
++
++    if (SWTPM_NVRAM_do_request(PUT, key, val, NULL))
++        goto out;
++
++    rc = 0;
++
++out:
++    free(key);
++    free(val);
++
++    return rc;
++}
++
++static TPM_RESULT
++SWTPM_NVRAM_DeleteName_Http(uint32_t tpm_number,
++                            const char *name,
++                            TPM_BOOL mustExist,
++                            const char *uri)
++{
++    TPM_RESULT rc = TPM_FAIL;
++    char *resp = NULL;
++    char *key;
++
++    /* TODO: xapi-guard should implement HEAD. */
++    key = get_key(uri, tpm_number, name);
++    if (!key)
++        goto out;
++
++    if (mustExist && SWTPM_NVRAM_do_request(HEAD, key, NULL, NULL)) {
++        TPM_DEBUG1("mustExist specified, but error retrieving existing key");
++        goto out;
++    }
++
++    if (SWTPM_NVRAM_do_request(DELETE, key, NULL, NULL))
++        goto out;
++
++
++    rc = 0;
++
++out:
++    free(key);
++    free(resp);
++
++    return rc;
++}
++
++static TPM_RESULT
++SWTPM_NVRAM_CheckState_Http(const char *uri,
++                            const char *name,
++                            size_t *blobsize)
++{
++    TPM_RESULT rc = TPM_FAIL;
++    char *key, *resp = NULL;
++    unsigned char *decoded_data = NULL;
++    uint32_t size;
++
++    key = get_key(uri, 0, name);
++    if (!key)
++        goto out;
++
++    if (SWTPM_NVRAM_do_request(GET, key, NULL, &resp))
++        goto out;
++
++    if (!base64_decode(resp, &decoded_data, &size)) {
++        logprintf(STDERR_FILENO, "base64_decode failed\n");
++        goto out;
++    }
++
++    *blobsize = size;
++    rc = 0;
++
++out:
++    free(key);
++    free(resp);
++    free(decoded_data);
++
++    return rc;
++}
++
++struct nvram_backend_ops nvram_http_ops = {
++    .prepare = SWTPM_NVRAM_Prepare_Http,
++    .load    = SWTPM_NVRAM_LoadData_Http,
++    .store   = SWTPM_NVRAM_StoreData_Http,
++    .delete  = SWTPM_NVRAM_DeleteName_Http,
++    .cleanup = SWTPM_NVRAM_Cleanup_Http,
++    .check_state = SWTPM_NVRAM_CheckState_Http,
++};

@@ -1,0 +1,44 @@
+From 51ccd2378bc6cacf8c8cea0c8c8ad13c9c6f0e99 Mon Sep 17 00:00:00 2001
+From: Ross Lagerwall <ross.lagerwall@citrix.com>
+Date: Wed, 2 Aug 2023 09:20:00 +0100
+Subject: [PATCH] Make stdout unbuffered in swtpm_{setup,localca}
+
+swtpm_setup and swtpm_localca may be run by a toolstack with log
+messages going to a pipe via stdout. Set stdout to be unbuffered to
+avoid log messages being lost if the process terminates unexpectedly.
+
+Signed-off-by: Ross Lagerwall <ross.lagerwall@citrix.com>
+---
+ src/swtpm_localca/swtpm_localca.c | 2 ++
+ src/swtpm_setup/swtpm_setup.c     | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/src/swtpm_localca/swtpm_localca.c b/src/swtpm_localca/swtpm_localca.c
+index 6941d45..48777e6 100644
+--- a/src/swtpm_localca/swtpm_localca.c
++++ b/src/swtpm_localca/swtpm_localca.c
+@@ -611,6 +611,8 @@ int main(int argc, char *argv[])
+     struct stat statbuf;
+     int ret = 1;
+ 
++    setvbuf(stdout, 0, _IONBF, 0);
++
+     if (init(&default_options_file, &default_config_file) < 0)
+         goto error;
+     optsfile = g_strdup(default_options_file);
+diff --git a/src/swtpm_setup/swtpm_setup.c b/src/swtpm_setup/swtpm_setup.c
+index 8153b9d..aafa448 100644
+--- a/src/swtpm_setup/swtpm_setup.c
++++ b/src/swtpm_setup/swtpm_setup.c
+@@ -1230,6 +1230,8 @@ int main(int argc, char *argv[])
+     int ret = 1;
+     g_autoptr(GError) error = NULL;
+ 
++    setvbuf(stdout, 0, _IONBF, 0);
++
+     if (init(&config_file) < 0)
+         goto error;
+ 
+-- 
+2.41.0
+

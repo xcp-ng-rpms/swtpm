@@ -1,0 +1,48 @@
+From a2abd3b67def3d488c59d68ec430f857e8f441a7 Mon Sep 17 00:00:00 2001
+From: Ross Lagerwall <ross.lagerwall@citrix.com>
+Date: Thu, 27 Oct 2022 16:30:11 +0100
+Subject: [PATCH] swtpm_setup: Configure swtpm to log to stdout/err if needed
+
+If swtpm_setup is configured with a log file, it launches swtpm
+configured with the same log file. If not, swtpm_setup logs will go to
+stdout/stderr and it should configure swtpm to do the same.
+
+Signed-off-by: Ross Lagerwall <ross.lagerwall@citrix.com>
+---
+ src/swtpm_setup/swtpm.c | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/src/swtpm_setup/swtpm.c b/src/swtpm_setup/swtpm.c
+index 77871d7..2643ee2 100644
+--- a/src/swtpm_setup/swtpm.c
++++ b/src/swtpm_setup/swtpm.c
+@@ -66,6 +66,7 @@ static int swtpm_start(struct swtpm *self)
+     struct stat statbuf;
+     gboolean success;
+     GError *error = NULL;
++    GSpawnFlags flags;
+     unsigned ctr;
+     int pidfile_fd;
+     int ret = 1;
+@@ -128,8 +129,16 @@ static int swtpm_start(struct swtpm *self)
+     }
+ #endif
+ 
+-    success = g_spawn_async(NULL, argv, NULL,
+-                            G_SPAWN_LEAVE_DESCRIPTORS_OPEN | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
++    flags = G_SPAWN_LEAVE_DESCRIPTORS_OPEN;
++    if (gl_LOGFILE) {
++        flags |= G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL;
++    } else {
++#if GLIB_CHECK_VERSION(2, 74, 0)
++        flags |= G_SPAWN_CHILD_INHERITS_STDOUT | G_SPAWN_CHILD_INHERITS_STDERR;
++#endif
++    }
++
++    success = g_spawn_async(NULL, argv, NULL, flags,
+                             NULL, NULL, &self->pid, &error);
+     if (!success) {
+         logerr(self->logfile, "Could not start swtpm: %s\n", error->message);
+-- 
+2.31.1
+
