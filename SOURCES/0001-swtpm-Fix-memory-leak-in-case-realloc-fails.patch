@@ -1,0 +1,38 @@
+From c94a1c4cbdae46f98f1d35b01195c45e71ea1724 Mon Sep 17 00:00:00 2001
+From: Stefan Berger <stefanb@linux.ibm.com>
+Date: Fri, 30 Sep 2022 10:13:05 -0400
+Subject: [PATCH 1/1] swtpm: Fix memory leak in case realloc fails
+
+Signed-off-by: Stefan Berger <stefanb@linux.ibm.com>
+---
+ src/swtpm/options.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/src/swtpm/options.c b/src/swtpm/options.c
+index 43256ad3c648..f89bee4c19d2 100644
+--- a/src/swtpm/options.c
++++ b/src/swtpm/options.c
+@@ -84,14 +84,16 @@ option_value_add(OptionValues *ovs, const OptionDesc optdesc, const char *val,
+     long unsigned int lui;
+     struct passwd *passwd;
+     struct group *group;
+-    
+     size_t idx = ovs->n_options;
+-    
+-    ovs->options = realloc(ovs->options, (idx + 1) * sizeof(*ovs->options));
+-    if (!ovs->options) {
++    void *tmp;
++
++    tmp = realloc(ovs->options, (idx + 1) * sizeof(*ovs->options));
++    if (!tmp) {
++        free(ovs->options);
+         option_error_set(error, "Out of memory");
+         return -1;
+     }
++    ovs->options = tmp;
+ 
+     ovs->n_options = idx + 1;
+     ovs->options[idx].type = optdesc.type;
+-- 
+2.43.0
+
