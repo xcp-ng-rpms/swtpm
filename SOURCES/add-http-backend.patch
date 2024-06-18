@@ -1,5 +1,5 @@
 diff --git a/configure.ac b/configure.ac
-index 08acf92..d3462a9 100644
+index 08acf92026ac..a60384c8c589 100644
 --- a/configure.ac
 +++ b/configure.ac
 @@ -232,6 +232,18 @@ if test $? -ne 0; then
@@ -21,7 +21,21 @@ index 08acf92..d3462a9 100644
  GLIB_CFLAGS=$(pkg-config --cflags glib-2.0)
  if test $? -ne 0; then
     AC_MSG_ERROR("Is libglib-2.0-dev/glib2-devel installed? -- could not get cflags")
-@@ -615,6 +627,8 @@ echo "       MY_LDFLAGS = $MY_LDFLAGS"
+@@ -556,7 +568,12 @@ if test "$with_seccomp" != "no"; then
+                      [whether to build in seccomp profile (Linux only)])
+ fi
+ 
+-AC_SEARCH_LIBS(forkpty, util bsd, LOCALCA_LIBS="$ac_cv_search_forkpty")
++AC_SEARCH_LIBS(forkpty, util bsd,
++               [AS_IF([test x$ac_cv_search_forkpty != "xnone required"],
++                LOCALCA_LIBS="$ac_cv_search_forkpty",
++                LOCALCA_LIBS=)
++               ]
++              )
+ AC_SUBST([LOCALCA_LIBS])
+ 
+ MY_CFLAGS="$CFLAGS"
+@@ -615,6 +632,8 @@ echo "       MY_LDFLAGS = $MY_LDFLAGS"
  echo "  LIBSECCOMP_LIBS = $LIBSECCOMP_LIBS"
  echo " JSON_GLIB_CFLAGS = $JSON_GLIB_CFLAGS"
  echo "   JSON_GLIB_LIBS = $JSON_GLIB_LIBS"
@@ -31,7 +45,7 @@ index 08acf92..d3462a9 100644
  echo "        GLIB_LIBS = $GLIB_LIBS"
  echo "     LOCALCA_LIBS = $LOCALCA_LIBS"
 diff --git a/src/swtpm/Makefile.am b/src/swtpm/Makefile.am
-index 5454a6f..3144f8b 100644
+index 5454a6f7b747..3144f8b1887d 100644
 --- a/src/swtpm/Makefile.am
 +++ b/src/swtpm/Makefile.am
 @@ -52,6 +52,7 @@ libswtpm_libtpms_la_SOURCES = \
@@ -59,7 +73,7 @@ index 5454a6f..3144f8b 100644
  	$(LIBSECCOMP_LIBS) \
  	$(LIBCRYPTO_LIBS)
 diff --git a/src/swtpm/swtpm.c b/src/swtpm/swtpm.c
-index b48175c..a7b9821 100644
+index b48175cb9879..a7b982164f08 100644
 --- a/src/swtpm/swtpm.c
 +++ b/src/swtpm/swtpm.c
 @@ -50,6 +50,7 @@
@@ -71,7 +85,7 @@ index b48175c..a7b9821 100644
  #include <libtpms/tpm_library.h>
  #include <libtpms/tpm_memory.h>
 diff --git a/src/swtpm/swtpm_nvstore.c b/src/swtpm/swtpm_nvstore.c
-index 144d897..4173d4c 100644
+index 144d8975ec54..4173d4c8c5cf 100644
 --- a/src/swtpm/swtpm_nvstore.c
 +++ b/src/swtpm/swtpm_nvstore.c
 @@ -187,6 +187,10 @@ TPM_RESULT SWTPM_NVRAM_Init(void)
@@ -86,7 +100,7 @@ index 144d897..4173d4c 100644
          logprintf(STDERR_FILENO,
                    "SWTPM_NVRAM_Init: Unsupported backend.\n");
 diff --git a/src/swtpm/swtpm_nvstore.h b/src/swtpm/swtpm_nvstore.h
-index 6e34891..f04abf6 100644
+index 6e34891d09b6..f04abf668df3 100644
 --- a/src/swtpm/swtpm_nvstore.h
 +++ b/src/swtpm/swtpm_nvstore.h
 @@ -129,6 +129,7 @@ struct nvram_backend_ops {
@@ -99,10 +113,10 @@ index 6e34891..f04abf6 100644
  
 diff --git a/src/swtpm/swtpm_nvstore_http.c b/src/swtpm/swtpm_nvstore_http.c
 new file mode 100644
-index 0000000..147fef9
+index 000000000000..2c4ee82cb22b
 --- /dev/null
 +++ b/src/swtpm/swtpm_nvstore_http.c
-@@ -0,0 +1,598 @@
+@@ -0,0 +1,636 @@
 +/* must be first to ensure we get asprintf */
 +#define _GNU_SOURCE
 +#include <stdio.h>
@@ -110,6 +124,7 @@ index 0000000..147fef9
 +
 +#include "config.h"
 +
++#include <assert.h>
 +#include <string.h>
 +#include <stdlib.h>
 +#include <errno.h>
@@ -126,6 +141,7 @@ index 0000000..147fef9
 +#include "swtpm_nvstore.h"
 +#include "key.h"
 +#include "logging.h"
++#include "mainloop.h"
 +#include "tpmstate.h"
 +#include "utils.h"
 +
@@ -155,6 +171,11 @@ index 0000000..147fef9
 +}
 +
 +#define MAX_RECEIVE_SIZE (1024 * 1024)
++
++#define SEC_TO_USEC 1000000
++#define MSEC_TO_USEC 1000
++#define BACKOFF_INIT (100 * MSEC_TO_USEC)
++#define BACKOFF_MAX (20 * SEC_TO_USEC)
 +
 +static CURL *curl;
 +static char *socket_path;
@@ -424,8 +445,10 @@ index 0000000..147fef9
 + *
 + * If out is provided, return the response as a string.
 + *
++ * Returns the HTTP response code. Otherwise returns -CURLcode if the HTTP
++ * transaction fails to complete.
 + */
-+static TPM_RESULT
++static int
 +SWTPM_NVRAM_do_request(enum method method, const char *url, const char *data, char **out)
 +{
 +    char errbuf[CURL_ERROR_SIZE];
@@ -469,7 +492,7 @@ index 0000000..147fef9
 +            list = curl_slist_append(list, "Content-Type: application/octet-stream");
 +            if (!list) {
 +                logprintf(STDERR_FILENO, "curl_slist_append failed\n");
-+                return TPM_FAIL;
++                return -CURLE_OUT_OF_MEMORY;
 +            }
 +
 +            struct curl_slist *temp;
@@ -480,7 +503,7 @@ index 0000000..147fef9
 +            if (!temp) {
 +                logprintf(STDERR_FILENO, "curl_slist_append failed\n");
 +                curl_slist_free_all(list);
-+                return TPM_FAIL;
++                return -CURLE_OUT_OF_MEMORY;
 +            }
 +            list = temp;
 +            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
@@ -490,8 +513,7 @@ index 0000000..147fef9
 +          case GET:
 +          case DELETE:
 +          default:
-+            logprintf(STDERR_FILENO, "Method is expected to be PUT, is %d\n", method);
-+            return TPM_FAIL;
++            assert(0);
 +        }
 +    } else {
 +        if (!out) {
@@ -507,14 +529,11 @@ index 0000000..147fef9
 +                case PUT:
 +                case GET:
 +                default:
-+                    logprintf(STDERR_FILENO, "Method is expected to be HEAD or DELETE, but is %d\n", method);
-+                    return TPM_FAIL;
++                    assert(0);
 +            }
 +        } else {
-+            if (method != GET) {
-+                logprintf(STDERR_FILENO, "Method is expected to be GET, but is %d\n", method);
-+                return TPM_FAIL;
-+            }
++            if (method != GET)
++                assert(0);
 +        }
 +    }
 +
@@ -529,10 +548,10 @@ index 0000000..147fef9
 +
 +    if (rc != CURLE_OK) {
 +        logprintf(STDERR_FILENO, "libcurl error on %s: (%d) %s\n",
-+                  url, *errbuf ? errbuf : curl_easy_strerror(rc));
++                  url, rc, *errbuf ? errbuf : curl_easy_strerror(rc));
 +        free(output.data);
 +
-+        return TPM_FAIL;
++        return -rc;
 +    }
 +
 +    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
@@ -540,7 +559,7 @@ index 0000000..147fef9
 +        logprintf(STDERR_FILENO, "HTTP code %d from %s\n", response_code, url);
 +        TPM_DEBUG1("http error response: %s\n", output.data);
 +        free(output.data);
-+        return TPM_FAIL;
++        return response_code;
 +    }
 +
 +    if (out)
@@ -549,7 +568,40 @@ index 0000000..147fef9
 +        free(output.data);
 +
 +    TPM_DEBUG3("curl OK");
-+    return 0;
++    return response_code;
++}
++
++/*
++ * Send an HTTP request. The request is retried for errors which may be
++ * transient. Transient errors are considered to be errors where the HTTP
++ * transaction does not complete (e.g. because the server is temporarily down)
++ * or the server responds with a 5xx error.
++ * Returns 0 on success and TPM_FAIL on error.
++ */
++static TPM_RESULT
++SWTPM_NVRAM_do_request_retry(enum method method,
++                             const char *url,
++                             const char *data,
++                             char **out)
++{
++    int ret;
++    unsigned int backoff = BACKOFF_INIT;
++
++    while (!mainloop_terminate) {
++        ret = SWTPM_NVRAM_do_request(method, url, data, out);
++
++        if (ret >= 0 && ret < 500) {
++            return (ret == 200 || ret == 204) ? 0 : TPM_FAIL;
++        } else {
++            TPM_DEBUG3("Backing off for %u ms before retrying\n", backoff);
++            usleep(backoff);
++            backoff *= 2;
++            if (backoff > BACKOFF_MAX)
++                backoff = BACKOFF_MAX;
++        }
++    }
++
++    return TPM_FAIL;
 +}
 +
 +static TPM_RESULT
@@ -569,7 +621,7 @@ index 0000000..147fef9
 +        goto out;
 +
 +
-+    if (SWTPM_NVRAM_do_request(GET, key, NULL, &resp))
++    if (SWTPM_NVRAM_do_request_retry(GET, key, NULL, &resp))
 +        goto out;
 +
 +    /*
@@ -615,7 +667,7 @@ index 0000000..147fef9
 +        goto out;
 +    }
 +
-+    if (SWTPM_NVRAM_do_request(PUT, key, val, NULL))
++    if (SWTPM_NVRAM_do_request_retry(PUT, key, val, NULL))
 +        goto out;
 +
 +    rc = 0;
@@ -642,12 +694,12 @@ index 0000000..147fef9
 +    if (!key)
 +        goto out;
 +
-+    if (mustExist && SWTPM_NVRAM_do_request(HEAD, key, NULL, NULL)) {
++    if (mustExist && SWTPM_NVRAM_do_request_retry(HEAD, key, NULL, NULL)) {
 +        TPM_DEBUG1("mustExist specified, but error retrieving existing key");
 +        goto out;
 +    }
 +
-+    if (SWTPM_NVRAM_do_request(DELETE, key, NULL, NULL))
++    if (SWTPM_NVRAM_do_request_retry(DELETE, key, NULL, NULL))
 +        goto out;
 +
 +
@@ -674,7 +726,7 @@ index 0000000..147fef9
 +    if (!key)
 +        goto out;
 +
-+    if (SWTPM_NVRAM_do_request(GET, key, NULL, &resp))
++    if (SWTPM_NVRAM_do_request_retry(GET, key, NULL, &resp))
 +        goto out;
 +
 +    if (!base64_decode(resp, &decoded_data, &size)) {

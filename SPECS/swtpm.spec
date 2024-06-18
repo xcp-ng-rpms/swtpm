@@ -1,13 +1,13 @@
-%global package_speccommit 5cd8e9d62fb54e737545a64a250ca753c45b95d9
+%global package_speccommit 78c8020e29baab8005ef45c4cb32137fea1b38ed
 %global usver 0.7.3
-%global xsver 5
+%global xsver 8
 %global xsrel %{xsver}%{?xscount}%{?xshash}
 %global package_srccommit v0.7.3
 
 Summary: TPM Emulator
 Name:           swtpm
 Version:        0.7.3
-Release: %{?xsrel}%{?dist}
+Release:        %{?xsrel}%{?dist}
 License:        BSD
 Source0: swtpm-0.7.3.tar.gz
 Patch0: swtpm_setup-Configure-swtpm-to-log-to-stdout-err-if-.patch
@@ -15,9 +15,14 @@ Patch1: swtpm-Add-a-chroot-option.patch
 Patch2: tests-If-filesystem-is-mounted-with-nodev-opt-skip-C.patch
 Patch3: swtpm-Advertise-the-chroot-option-with-cmdarg-chroot.patch
 Patch4: 0001-Make-stdout-unbuffered-in-swtpm_-setup-localca.patch
-Patch5: gnutls-compat.patch
-Patch6: set-localca-options.patch
-Patch7: add-http-backend.patch
+Patch5: 0001-swtpm-Remove-assignment-to-unused-variable.patch
+Patch6: 0001-swtpm-Fix-memory-leak-in-case-realloc-fails.patch
+Patch7: 0001-swtpm_cert-Test-for-NULL-pointer-returned-by-malloc.patch
+Patch8: 0001-swtpm-Close-fd-after-main-loop.patch
+Patch9: 0002-swtpm-Fix-double-free-in-error-path.patch
+Patch10: gnutls-compat.patch
+Patch11: set-localca-options.patch
+Patch12: add-http-backend.patch
 
 BuildRequires:  git-core
 BuildRequires:  automake
@@ -148,6 +153,16 @@ rm -f %{buildroot}%{_datadir}/%{name}/swtpm-create-tpmca
 %{?_cov_results_package}
 
 %changelog
+* Thu Mar 14 2024 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.3-8
+- Add gnutls-compat.patch back to make compatible with xs8/xs9
+- CA-377995: Fix static analysis warnings
+
+* Thu Nov 23 2023 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.3-7
+- CA-383866: Retry HTTP requests to avoid a failure
+
+* Mon Sep 11 2023 Lin Liu <Lin.Liu01@citrix.com> - 0.7.3-6
+- CP-45247: Remove gnutls-compat.patch and build for xs9
+
 * Wed Aug 02 2023 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.3-5
 - CA-380178: Make stdout unbuffered in swtpm_{setup,localca}
 

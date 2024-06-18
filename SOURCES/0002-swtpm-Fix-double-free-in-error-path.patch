@@ -1,0 +1,29 @@
+From f237f9f0b4be230da14c9958da8cd3fb4858df12 Mon Sep 17 00:00:00 2001
+From: Ross Lagerwall <ross.lagerwall@citrix.com>
+Date: Wed, 13 Mar 2024 17:10:19 +0000
+Subject: [PATCH 2/2] swtpm: Fix double free in error path
+
+On error, the caller will call options_value_free() so don't free
+ovs->options to avoid a double free.
+
+Fixes: c94a1c4cbdae ("swtpm: Fix memory leak in case realloc fails")
+Signed-off-by: Ross Lagerwall <ross.lagerwall@citrix.com>
+---
+ src/swtpm/options.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/swtpm/options.c b/src/swtpm/options.c
+index f89bee4c19d2..fbc3bee692c8 100644
+--- a/src/swtpm/options.c
++++ b/src/swtpm/options.c
+@@ -89,7 +89,6 @@ option_value_add(OptionValues *ovs, const OptionDesc optdesc, const char *val,
+ 
+     tmp = realloc(ovs->options, (idx + 1) * sizeof(*ovs->options));
+     if (!tmp) {
+-        free(ovs->options);
+         option_error_set(error, "Out of memory");
+         return -1;
+     }
+-- 
+2.43.0
+

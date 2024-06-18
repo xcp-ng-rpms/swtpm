@@ -1,0 +1,30 @@
+From 8655c6f8ecb55d1bd9faf3c1043add577a603297 Mon Sep 17 00:00:00 2001
+From: Ross Lagerwall <ross.lagerwall@citrix.com>
+Date: Wed, 13 Mar 2024 17:09:08 +0000
+Subject: [PATCH 1/1] swtpm: Close fd after main loop
+
+If we've accepted a connection fd during the main loop, close it once
+the main loop terminates.
+
+Signed-off-by: Ross Lagerwall <ross.lagerwall@citrix.com>
+---
+ src/swtpm/mainloop.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/swtpm/mainloop.c b/src/swtpm/mainloop.c
+index 846f02c03d53..785abc47b99a 100644
+--- a/src/swtpm/mainloop.c
++++ b/src/swtpm/mainloop.c
+@@ -385,6 +385,9 @@ skip_process:
+         close(ctrlclntfd);
+     ctrlchannel_set_client_fd(mlp->cc, -1);
+ 
++    if (connection_fd.fd >= 0 && !(mlp->flags & MAIN_LOOP_FLAG_USE_FD))
++        close(connection_fd.fd);
++
+     if (mlp->fd >= 0) {
+         close(mlp->fd);
+         mlp->fd = -1;
+-- 
+2.43.0
+

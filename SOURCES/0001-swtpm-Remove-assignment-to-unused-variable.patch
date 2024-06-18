@@ -1,0 +1,28 @@
+From 81f517feec5e789b7bf5d4256d54e8da0b74a956 Mon Sep 17 00:00:00 2001
+From: Stefan Berger <stefanb@linux.ibm.com>
+Date: Wed, 25 May 2022 14:19:36 -0400
+Subject: [PATCH 1/1] swtpm: Remove assignment to unused variable
+
+Remove the assigment to 'res' since the subsequent code path does not
+need it.
+
+Signed-off-by: Stefan Berger <stefanb@linux.ibm.com>
+---
+ src/swtpm/ctrlchannel.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/swtpm/ctrlchannel.c b/src/swtpm/ctrlchannel.c
+index d50c6f3c5bcb..1d645f2ba99f 100644
+--- a/src/swtpm/ctrlchannel.c
++++ b/src/swtpm/ctrlchannel.c
+@@ -230,7 +230,6 @@ static int ctrlchannel_receive_state(ptm_setstate *pss, ssize_t n, int fd)
+         if (remain) {
+             n = read_eintr(fd, pss->u.req.data, sizeof(pss->u.req.data));
+             if (n < 0) {
+-                res = TPM_IOERROR;
+                 close(fd);
+                 fd = -1;
+                 goto err_fd_broken;
+-- 
+2.43.0
+
