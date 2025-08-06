@@ -1,6 +1,6 @@
-%global package_speccommit 78c8020e29baab8005ef45c4cb32137fea1b38ed
+%global package_speccommit 9a5d2733a6031131316689e4cbbed314d3c96827
 %global usver 0.7.3
-%global xsver 8
+%global xsver 9
 %global xsrel %{xsver}%{?xscount}%{?xshash}
 %global package_srccommit v0.7.3
 
@@ -35,8 +35,6 @@ BuildRequires:  expect
 BuildRequires:  net-tools
 BuildRequires:  openssl-devel
 BuildRequires:  socat
-BuildRequires:  trousers >= 0.3.9
-BuildRequires:  softhsm
 BuildRequires:  gnutls >= 3.1.0
 BuildRequires:  gnutls-devel
 BuildRequires:  gnutls-utils
@@ -75,7 +73,7 @@ Summary:        Tools for the TPM emulator
 License:        BSD
 Group:          Applications/Emulators
 Requires:       swtpm = %{version}-%{release}
-Requires:       trousers >= 0.3.9 bash gnutls-utils
+Requires:       bash gnutls-utils
 
 %description    tools
 Tools for the TPM emulator from the swtpm package
@@ -153,6 +151,9 @@ rm -f %{buildroot}%{_datadir}/%{name}/swtpm-create-tpmca
 %{?_cov_results_package}
 
 %changelog
+* Thu Oct 10 2024 Stephen Cheng <stephen.cheng@cloud.com> - 0.7.3-9
+- CP-51608: Removed softhsm from BuildRequres
+
 * Thu Mar 14 2024 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.3-8
 - Add gnutls-compat.patch back to make compatible with xs8/xs9
 - CA-377995: Fix static analysis warnings
