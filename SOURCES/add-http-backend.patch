@@ -72,6 +72,26 @@ index 5454a6f7b747..3144f8b1887d 100644
  	$(LIBRT_LIBS) \
  	$(LIBSECCOMP_LIBS) \
  	$(LIBCRYPTO_LIBS)
+diff --git a/src/swtpm/seccomp_profile.c b/src/swtpm/seccomp_profile.c
+index e2684f3974c4..faacd43299d7 100644
+--- a/src/swtpm/seccomp_profile.c
++++ b/src/swtpm/seccomp_profile.c
+@@ -166,7 +166,6 @@ int create_seccomp_profile(bool cusetpm, unsigned int action)
+         SCMP_SYS(tee),
+         SCMP_SYS(vmsplice),
+         SCMP_SYS(signalfd),
+-        SCMP_SYS(eventfd),
+         SCMP_SYS(timerfd_settime),
+ #ifdef __NR_timer_settime64
+         SCMP_SYS(timer_settime64),
+@@ -176,7 +175,6 @@ int create_seccomp_profile(bool cusetpm, unsigned int action)
+ #endif
+         SCMP_SYS(timerfd_gettime),
+         SCMP_SYS(signalfd4),
+-        SCMP_SYS(eventfd2),
+         SCMP_SYS(fanotify_init),
+         SCMP_SYS(fanotify_mark),
+         SCMP_SYS(mknod),
 diff --git a/src/swtpm/swtpm.c b/src/swtpm/swtpm.c
 index b48175cb9879..a7b982164f08 100644
 --- a/src/swtpm/swtpm.c

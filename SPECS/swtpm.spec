@@ -1,13 +1,13 @@
-%global package_speccommit 9a5d2733a6031131316689e4cbbed314d3c96827
+%global package_speccommit 5c91a9b4792948b5155dd73c01a65a5272aded2e
 %global usver 0.7.3
-%global xsver 9
+%global xsver 12
 %global xsrel %{xsver}%{?xscount}%{?xshash}
 %global package_srccommit v0.7.3
 
 Summary: TPM Emulator
 Name:           swtpm
 Version:        0.7.3
-Release:        %{?xsrel}%{?dist}
+Release: %{?xsrel}%{?dist}
 License:        BSD
 Source0: swtpm-0.7.3.tar.gz
 Patch0: swtpm_setup-Configure-swtpm-to-log-to-stdout-err-if-.patch
@@ -24,6 +24,13 @@ Patch10: gnutls-compat.patch
 Patch11: set-localca-options.patch
 Patch12: add-http-backend.patch
 
+%if 0%{?xenserver} >= 9
+# Prevent crypto policies disabling SHA-1.
+# swtpm algorithm list is unconditional. Since it advertizes
+# SHA-1, we MUST always provide a working SHA-1 impl
+Source1:        openssl-swtpm.cnf
+%endif
+
 BuildRequires:  git-core
 BuildRequires:  automake
 BuildRequires:  autoconf
@@ -32,7 +39,7 @@ BuildRequires:  libtpms-devel >= 0.6.0
 BuildRequires:  glib2-devel
 BuildRequires:  json-glib-devel
 BuildRequires:  expect
-BuildRequires:  net-tools
+BuildRequires:  iproute
 BuildRequires:  openssl-devel
 BuildRequires:  socat
 BuildRequires:  gnutls >= 3.1.0
@@ -82,6 +89,9 @@ Tools for the TPM emulator from the swtpm package
 %doc LICENSE README
 %{_bindir}/swtpm
 %{_mandir}/man8/swtpm.8*
+%if 0%{?xenserver} >= 9
+%{_sysconfdir}/ssl/openssl-swtpm.cnf
+%endif
 
 %files libs
 %doc LICENSE README
@@ -143,6 +153,12 @@ make %{?_smp_mflags} check VERBOSE=1
 rm -f %{buildroot}%{_libdir}/%{name}/*.{a,la,so}
 rm -f %{buildroot}%{_mandir}/man8/swtpm-create-tpmca.8*
 rm -f %{buildroot}%{_datadir}/%{name}/swtpm-create-tpmca
+
+%if 0%{?xenserver} >= 9
+%__install -d %{buildroot}%{_sysconfdir}/ssl
+cp %{SOURCE1} %{buildroot}/%{_sysconfdir}/ssl/
+%endif
+
 %{?_cov_install}
 
 %ldconfig_post libs
@@ -151,6 +167,15 @@ rm -f %{buildroot}%{_datadir}/%{name}/swtpm-create-tpmca
 %{?_cov_results_package}
 
 %changelog
+* Wed Mar 19 2025 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.3-12
+- CA-407177: Prevent crypto-policies disabling SHA1
+
+* Fri Jan 31 2025 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.3-11
+- CA-405654: Fix running with newer versions of cURL
+
+* Wed Jan 22 2025 Alex Brett <alex.brett@cloud.com> - 0.7.3-10
+- CP-53343: Replace net-tools with iproute
+
 * Thu Oct 10 2024 Stephen Cheng <stephen.cheng@cloud.com> - 0.7.3-9
 - CP-51608: Removed softhsm from BuildRequres
 
