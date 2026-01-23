@@ -7,7 +7,7 @@
 Summary: TPM Emulator
 Name:           swtpm
 Version:        0.7.3
-Release: %{?xsrel}%{?dist}
+Release: %{?xsrel}.1%{?dist}
 License:        BSD
 Source0: swtpm-0.7.3.tar.gz
 Patch0: swtpm_setup-Configure-swtpm-to-log-to-stdout-err-if-.patch
@@ -167,6 +167,9 @@ cp %{SOURCE1} %{buildroot}/%{_sysconfdir}/ssl/
 %{?_cov_results_package}
 
 %changelog
+* Mon Jan 26 2026 Philippe Coval <philippe.coval@vates.tech> - 0.7.3-12.1
+- Rebuild on openssl-3
+
 * Wed Mar 19 2025 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.3-12
 - CA-407177: Prevent crypto-policies disabling SHA1
 
