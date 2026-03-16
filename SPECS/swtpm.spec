@@ -7,7 +7,7 @@
 Summary: TPM Emulator
 Name:           swtpm
 Version:        0.7.3
-Release: %{?xsrel}.2%{?dist}
+Release: %{?xsrel}.2~XCPNG2698.1%{?dist}
 License:        BSD
 Source0: swtpm-0.7.3.tar.gz
 Patch0: swtpm_setup-Configure-swtpm-to-log-to-stdout-err-if-.patch
