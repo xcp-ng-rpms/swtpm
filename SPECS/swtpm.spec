@@ -7,7 +7,7 @@
 Summary: TPM Emulator
 Name:           swtpm
 Version:        0.7.3
-Release: %{?xsrel}.1%{?dist}
+Release: %{?xsrel}.2%{?dist}
 License:        BSD
 Source0: swtpm-0.7.3.tar.gz
 Patch0: swtpm_setup-Configure-swtpm-to-log-to-stdout-err-if-.patch
@@ -24,12 +24,10 @@ Patch10: gnutls-compat.patch
 Patch11: set-localca-options.patch
 Patch12: add-http-backend.patch
 
-%if 0%{?xenserver} >= 9
 # Prevent crypto policies disabling SHA-1.
 # swtpm algorithm list is unconditional. Since it advertizes
 # SHA-1, we MUST always provide a working SHA-1 impl
 Source1:        openssl-swtpm.cnf
-%endif
 
 BuildRequires:  git-core
 BuildRequires:  automake
@@ -167,6 +165,9 @@ cp %{SOURCE1} %{buildroot}/%{_sysconfdir}/ssl/
 %{?_cov_results_package}
 
 %changelog
+* Wed Sep 02 2026 Teddy Astie <teddy.astie@vates.tech> - 0.7.3-12.2
+- Introduce openssl-swtpm.cnf for XCP-ng 9.0 packaging.
+
 * Mon Jan 26 2026 Philippe Coval <philippe.coval@vates.tech> - 0.7.3-12.1
 - Rebuild on openssl-3
 
