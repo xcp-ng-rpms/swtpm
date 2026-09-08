@@ -28,7 +28,7 @@ Patch12: add-http-backend.patch
 # Prevent crypto policies disabling SHA-1.
 # swtpm algorithm list is unconditional. Since it advertizes
 # SHA-1, we MUST always provide a working SHA-1 impl
-Source1:        openssl-swtpm.cnf
+Source1: openssl-swtpm.cnf
 %endif
 
 BuildRequires:  git-core
