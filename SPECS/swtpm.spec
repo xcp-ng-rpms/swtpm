@@ -1,15 +1,15 @@
-%global package_speccommit 5c91a9b4792948b5155dd73c01a65a5272aded2e
-%global usver 0.7.3
-%global xsver 12
+%global package_speccommit c7a603deb01f7475ab2b46e128b09f7a9b54992b
+%global usver 0.7.5
+%global xsver 1
 %global xsrel %{xsver}%{?xscount}%{?xshash}
-%global package_srccommit v0.7.3
+%global package_srccommit v0.7.5
 
 Summary: TPM Emulator
 Name:           swtpm
-Version:        0.7.3
-Release: %{?xsrel}.2%{?dist}
+Version:        0.7.5
+Release: %{?xsrel}%{?dist}
 License:        BSD
-Source0: swtpm-0.7.3.tar.gz
+Source0: swtpm-0.7.5.tar.gz
 Patch0: swtpm_setup-Configure-swtpm-to-log-to-stdout-err-if-.patch
 Patch1: swtpm-Add-a-chroot-option.patch
 Patch2: tests-If-filesystem-is-mounted-with-nodev-opt-skip-C.patch
@@ -167,6 +167,9 @@ cp %{SOURCE1} %{buildroot}/%{_sysconfdir}/ssl/
 %{?_cov_results_package}
 
 %changelog
+* Thu Sep 17 2026 Ross Lagerwall <ross.lagerwall@citrix.com> - 0.7.5-1
+- Update to v0.7.5
+
 * Wed Jul 15 2026 Philippe Coval <philippe.coval@vates.tech> - 0.7.3-12.2
 - Rebuild on updated gnutls
 
