@@ -8,7 +8,7 @@ verb. Document it in the man page.
 
 Signed-off-by: Stefan Berger <stefanb@linux.ibm.com>
 diff --git a/man/man8/swtpm.pod b/man/man8/swtpm.pod
-index 46cbc8a..2fa3df7 100644
+index 46cbc8adf26a..2fa3df7a54e2 100644
 --- a/man/man8/swtpm.pod
 +++ b/man/man8/swtpm.pod
 @@ -310,6 +310,7 @@ may contain the following:
@@ -31,7 +31,7 @@ index 46cbc8a..2fa3df7 100644
  
  The I<--tpmstate> option supports the I<backend-uri=dir://...>
 diff --git a/src/swtpm/capabilities.c b/src/swtpm/capabilities.c
-index c528a8c..bbff7a6 100644
+index c528a8c5959b..bbff7a66edc8 100644
 --- a/src/swtpm/capabilities.c
 +++ b/src/swtpm/capabilities.c
 @@ -143,7 +143,7 @@ int capabilities_print_json(bool cusetpm)
@@ -52,7 +52,7 @@ index c528a8c..bbff7a6 100644
           nvram_backend_file,
           keysizecaps  ? keysizecaps                    : ""
 diff --git a/tests/_test_print_capabilities b/tests/_test_print_capabilities
-index 794b5ed..99962ab 100755
+index 926c724d0e97..759c5277d6f4 100755
 --- a/tests/_test_print_capabilities
 +++ b/tests/_test_print_capabilities
 @@ -25,7 +25,7 @@ if [ "${SWTPM_IFACE}" != "cuse" ]; then
@@ -65,15 +65,15 @@ index 794b5ed..99962ab 100755
  	echo "Unexpected response from ${SWTPM_IFACE} TPM to --print-capabilities:"
  	echo "Actual   : ${msg}"
 diff --git a/tests/_test_tpm2_print_capabilities b/tests/_test_tpm2_print_capabilities
-index 02986f3..acbcef7 100755
+index d621d5105870..0e86bcaae0da 100755
 --- a/tests/_test_tpm2_print_capabilities
 +++ b/tests/_test_tpm2_print_capabilities
 @@ -26,7 +26,7 @@ if [ "${SWTPM_IFACE}" != "cuse" ]; then
  fi
  
  # The rsa key size reporting is variable, so use a regex
--exp='\{ "type": "swtpm", "features": \[( "tpm-1.2",)? "tpm-2.0", '${noncuse}${seccomp}'"cmdarg-key-fd", "cmdarg-pwd-fd", "cmdarg-print-states", "nvram-backend-dir", "nvram-backend-file"(, "rsa-keysize-1024")?(, "rsa-keysize-2048")?(, "rsa-keysize-3072")? \], "version": "[^"]*" \}'
-+exp='\{ "type": "swtpm", "features": \[( "tpm-1.2",)? "tpm-2.0", '${noncuse}${seccomp}'"cmdarg-key-fd", "cmdarg-pwd-fd", "cmdarg-print-states", "cmdarg-chroot", "nvram-backend-dir", "nvram-backend-file"(, "rsa-keysize-1024")?(, "rsa-keysize-2048")?(, "rsa-keysize-3072")? \], "version": "[^"]*" \}'
+-exp='\{ "type": "swtpm", "features": \[( "tpm-1.2",)? "tpm-2.0", '${noncuse}${seccomp}'"cmdarg-key-fd", "cmdarg-pwd-fd", "cmdarg-print-states", "nvram-backend-dir", "nvram-backend-file"(, "rsa-keysize-1024")?(, "rsa-keysize-2048")?(, "rsa-keysize-3072")?(, "rsa-keysize-4096")? \], "version": "[^"]*" \}'
++exp='\{ "type": "swtpm", "features": \[( "tpm-1.2",)? "tpm-2.0", '${noncuse}${seccomp}'"cmdarg-key-fd", "cmdarg-pwd-fd", "cmdarg-print-states", "cmdarg-chroot", "nvram-backend-dir", "nvram-backend-file"(, "rsa-keysize-1024")?(, "rsa-keysize-2048")?(, "rsa-keysize-3072")?(, "rsa-keysize-4096")? \], "version": "[^"]*" \}'
  if ! [[ ${msg} =~ ${exp} ]]; then
  	echo "Unexpected response from ${SWTPM_IFACE} TPM to --print-capabilities:"
  	echo "Actual   : ${msg}"
